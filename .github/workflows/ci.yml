@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check JS syntax
+        run: find js -name "*.js" -print0 | xargs -0 -n1 node --check
+
+      - name: Validate HTML
+        run: npx --yes html-validate index.html
