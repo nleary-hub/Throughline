@@ -137,8 +137,16 @@ window.Views.triage = (() => {
 
     function openQuestionModal(ini) {
       const q = UI.textArea({ placeholder: "What do you need to know before deciding?" });
+      const aiBtn = AI.available() ? UI.button("✨ Suggest a question", { sm: true, variant: "ghost", onClick: async () => {
+        aiBtn.disabled = true;
+        const prompt = `A hospital operations director is triaging this proposal and wants to ask the submitter one clarifying question before deciding whether to accept it. Reply with ONLY the question itself — one sentence, no preamble, no quotes.\n\nTitle: ${ini.title}\nProblem: ${ini.problem}`;
+        const suggestion = await AI.ask(prompt, { modelTier: "quick" });
+        aiBtn.disabled = false;
+        if (suggestion) { q.value = suggestion; }
+        else UI.toast("AI suggestion isn't available right now.");
+      }}) : null;
       const m = UI.modal({
-        title: "Ask a question", body: UI.field("Question", q),
+        title: "Ask a question", body: UI.el("div", { class: "card-stack" }, [UI.field("Question", q), aiBtn]),
         footer: [UI.button("Cancel", { variant: "ghost", onClick: () => m.close() }), UI.button("Send", { variant: "primary", onClick: async () => {
           if (!q.value.trim()) return;
           const fresh = JSON.parse(JSON.stringify(ini));

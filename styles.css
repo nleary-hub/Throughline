@@ -186,7 +186,7 @@ input::placeholder,textarea::placeholder{color:var(--text-3);}
 .card-stack{display:flex; flex-direction:column; gap:8px;}
 .region-gap{display:flex; flex-direction:column; gap:16px;}
 
-.card-header{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;}
+.card-header{display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px; margin-bottom:10px;}
 .card-header .text-section{font-size:14px;}
 
 /* ===== chips / tags / status boxes ===== */

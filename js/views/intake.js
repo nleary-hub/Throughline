@@ -14,17 +14,24 @@ window.Views.intake = (() => {
     return "process_improvement";
   }
 
-  function inferSize(answers, capital) {
-    if (capital && capital >= 250000) return "L";
-    if (answers.needsSupplies === "yes" || answers.needsSoftware) return "M";
+  // Rough, intake-only heuristic — the real size is a director's call made
+  // during triage. This exists to give the submitter an honest preview, so
+  // it has to actually be able to reach "L" from what intake collects: a
+  // capital estimate (mirrors the senior-director sign-off threshold) or a
+  // new procedure that also spans more than one department.
+  function inferSize(answers, capital, departmentCount) {
+    const crosses = (departmentCount || 0) > 1;
+    if (capital >= 250000 || (answers.newProcedure && crosses)) return "L";
+    if (capital >= 50000 || answers.needsSupplies === "yes" || answers.needsSoftware || crosses) return "M";
     return "S";
   }
 
   function livePreview(state, S) {
     const type = inferType(state.answers);
-    const size = inferSize(state.answers, 0);
+    const capital = Number(state.capital) || 0;
+    const size = inferSize(state.answers, capital, state.departments.length);
     const fakeIni = {
-      type, size, track: "departmental", estimates: { capital: 0, fte: 0, crossesServiceLines: false },
+      type, size, track: "departmental", estimates: { capital, fte: 0, crossesServiceLines: state.departments.length > 1 },
       intakeAnswers: state.answers,
     };
     const applicable = Model.computeApplicableRequirements(fakeIni, S.config);
@@ -52,7 +59,7 @@ window.Views.intake = (() => {
 
     const state = {
       step: 1,
-      title: "", problem: "", departments: [],
+      title: "", problem: "", departments: [], capital: "",
       answers: { needsSupplies: "unsure", needsSoftware: false, newProcedure: false, timing: "this_fiscal_year" },
       submitterName: "", submitterEmail: "", sponsorId: "", notes: "",
     };
@@ -81,6 +88,8 @@ window.Views.intake = (() => {
           drawStep1();
         }));
       }
+      const capitalInput = UI.textInput({ type: "number", min: "0", value: state.capital, placeholder: "Optional — only if you have a rough number", onInput: (e) => { state.capital = e.target.value; redrawPreview(); } });
+
       function pillGroup(field, options) {
         const row = UI.el("div", { class: "radio-row" });
         for (const opt of options) {
@@ -89,16 +98,77 @@ window.Views.intake = (() => {
         return row;
       }
 
+      const aiWrap = UI.el("div", { style: { marginTop: "12px" } });
+      function drawAiButton() {
+        UI.clear(aiWrap);
+        if (!AI.available()) return;
+        aiWrap.appendChild(UI.button("✨ Get AI suggestions", { sm: true, variant: "ghost", onClick: () => getAiSuggestions(aiWrap) }));
+      }
+      async function getAiSuggestions(hostWrap) {
+        if (!state.title.trim() || !state.problem.trim()) { UI.toast("Add a title and problem first."); return; }
+        UI.clear(hostWrap);
+        hostWrap.appendChild(UI.el("div", { class: "text-meta" }, "Asking AI for suggestions…"));
+        const depts = S.config.departments || [];
+        const prompt = `You help fill out an intake form for an internal hospital operations initiative tracker. Given the title and problem below, suggest form values. Respond with ONLY a JSON object (no prose, no markdown fences) matching exactly this shape:
+{"type":"new_service|quality_improvement|process_improvement|capital_construction|practice_change|departmental|other","departmentIds":["..."],"needsSupplies":"no|unsure|yes","needsSoftware":true|false,"newProcedure":true|false,"tightenedProblem":"a tightened 1-2 sentence restatement, plain language","reasoning":"one sentence on why you picked this type"}
+
+Departments (pick zero or more ids that seem involved):
+${depts.map(d => `${d.id} — ${d.name}`).join("\n")}
+
+Title: ${state.title.trim()}
+Problem: ${state.problem.trim()}`;
+        const suggestion = await AI.askJson(prompt, { modelTier: "quick" });
+        UI.clear(hostWrap);
+        if (!suggestion) {
+          hostWrap.appendChild(UI.el("div", { class: "text-meta" }, "AI suggestions aren't available right now — check the API key in Settings, or continue filling this out yourself."));
+          drawAiButton();
+          return;
+        }
+        const validDeptIds = new Set(depts.map(d => d.id));
+        const suggestedDeptNames = (suggestion.departmentIds || []).filter(id => validDeptIds.has(id)).map(id => depts.find(d => d.id === id).name);
+        hostWrap.appendChild(UI.card([
+          UI.el("div", { class: "mono-label" }, "AI suggestion"),
+          UI.el("div", { class: "card-stack", style: { marginTop: "8px" } }, [
+            UI.el("div", { class: "text-body" }, [UI.el("b", {}, "Type: "), Model.TYPE_LABEL[suggestion.type] || suggestion.type]),
+            suggestedDeptNames.length ? UI.el("div", { class: "text-body" }, [UI.el("b", {}, "Departments: "), suggestedDeptNames.join(", ")]) : null,
+            UI.el("div", { class: "text-body" }, [UI.el("b", {}, "Supplies/devices: "), String(suggestion.needsSupplies)]),
+            UI.el("div", { class: "text-body" }, [UI.el("b", {}, "New software: "), suggestion.needsSoftware ? "Yes" : "No"]),
+            UI.el("div", { class: "text-body" }, [UI.el("b", {}, "New procedure: "), suggestion.newProcedure ? "Yes" : "No"]),
+            suggestion.tightenedProblem ? UI.el("div", { class: "text-body" }, [UI.el("b", {}, "Tightened problem: "), suggestion.tightenedProblem]) : null,
+            suggestion.reasoning ? UI.el("div", { class: "text-meta" }, suggestion.reasoning) : null,
+          ]),
+          UI.el("div", { style: { display: "flex", gap: "8px", marginTop: "10px" } }, [
+            UI.button("Apply", { sm: true, variant: "primary", onClick: () => {
+              // Type itself isn't a free field here — it's always derived from
+              // the newProcedure answer (see inferType) and confirmed by a
+              // director at triage; the AI's type guess is informational,
+              // shown above, not a field this form can independently set.
+              if (suggestedDeptNames.length) state.departments = Array.from(new Set([...state.departments, ...suggestion.departmentIds.filter(id => validDeptIds.has(id))]));
+              if (["no", "unsure", "yes"].includes(suggestion.needsSupplies)) state.answers.needsSupplies = suggestion.needsSupplies;
+              state.answers.needsSoftware = !!suggestion.needsSoftware;
+              state.answers.newProcedure = !!suggestion.newProcedure;
+              if (suggestion.tightenedProblem) state.problem = suggestion.tightenedProblem;
+              UI.toast("Suggestions applied — review before submitting.");
+              drawStep1();
+            }}),
+            UI.button("Dismiss", { sm: true, variant: "ghost", onClick: () => drawAiButton() }),
+          ]),
+        ], { class: "raised" }));
+      }
+      drawAiButton();
+
       formCol.appendChild(UI.card([
         UI.el("div", { class: "card-stack" }, [
           UI.field("Title", titleInput),
           UI.field("Problem", problemInput, "What goes wrong today, in plain language."),
           UI.field("Departments involved", deptWrap),
+          UI.field("Rough budget estimate, if known ($)", capitalInput),
           UI.field("Does this need new supplies or devices?", pillGroup("needsSupplies", [{ value: "no", label: "No" }, { value: "unsure", label: "Not sure" }, { value: "yes", label: "Yes" }])),
           UI.field("Does this need new software or a system interface?", pillGroup("needsSoftware", [{ value: false, label: "No" }, { value: true, label: "Yes" }])),
           UI.field("Does this introduce a new procedure?", pillGroup("newProcedure", [{ value: false, label: "No" }, { value: true, label: "Yes" }])),
           UI.field("Timing", pillGroup("timing", [{ value: "this_fiscal_year", label: "This fiscal year" }, { value: "next_fiscal_year", label: "Next fiscal year" }, { value: "unsure", label: "Not sure" }])),
         ]),
+        aiWrap,
         UI.el("div", { style: { display: "flex", justifyContent: "flex-end", marginTop: "14px" } }, [
           UI.button("Next", { variant: "primary", onClick: () => {
             if (!state.title.trim() || !state.problem.trim()) { UI.toast("Title and problem are required."); return; }
@@ -137,16 +207,18 @@ window.Views.intake = (() => {
       const counter = ((S.config.refCounter || {})[year] || 0) + 1;
       const ref = `TL-${year}-${String(counter).padStart(3, "0")}`;
       const type = inferType(state.answers);
+      const capital = Math.max(0, Number(state.capital) || 0);
       const ini = {
         id, ref, title: state.title.trim(), problem: state.problem.trim(),
-        type, track: "departmental", departments: state.departments, size: null,
+        type, track: "departmental", departments: state.departments,
+        size: inferSize(state.answers, capital, state.departments.length),
         stage: "proposed", stageEnteredOn: UI.todayStr(),
         priority: { band: "unranked", rank: null, setOn: null, setBy: null, holdsUntil: null, rationale: "" },
         healthOverride: null,
         ownerId: null, sponsorId: state.sponsorId || null, execSponsorId: null, contributorIds: [],
         nextAction: { text: "Director triage", ownerId: null, dueOn: null, kind: "decision" },
         requirements: [], milestones: [], risks: [], dependencies: [],
-        estimates: { capital: 0, fte: 0, crossesServiceLines: false },
+        estimates: { capital, fte: 0, crossesServiceLines: state.departments.length > 1 },
         intakeAnswers: state.answers,
         submittedBy: { name: state.submitterName.trim(), email: state.submitterEmail.trim(), personId: S.me || null },
         submittedOn: UI.todayStr(),

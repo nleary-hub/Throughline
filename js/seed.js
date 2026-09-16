@@ -125,6 +125,7 @@ const Seed = (() => {
           hist("2026-08-01", "ppl_tom", "created", "Submitted via intake."),
           hist("2026-08-02", "ppl_marcus", "triaged", "Accepted into evaluation — lightweight departmental change.", "", { from: "proposed", to: "evaluating" }),
           hist("2026-08-10", "ppl_tom", "stage_change", "Moved to In flight.", "", { from: "clearing", to: "in_flight" }),
+          hist("2026-09-12", "ppl_marcus", "question", "Question from Marcus Ibe.", "Does the updated titration range need pharmacy sign-off before it goes live, or is nursing education enough on its own?", { forId: "ppl_tom" }),
         ],
         outcome: null, closedOn: null, snoozes: [], demo: true,
       },

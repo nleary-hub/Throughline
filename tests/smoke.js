@@ -130,6 +130,65 @@ async function main() {
     const classHistory = await page.locator(".hbody .hsummary").first().textContent();
     assert(classHistory.includes("Reclassified"), `classification edit re-evaluates requirements (got: ${classHistory})`);
 
+    // Regression guard: priority band ("committed"/"watchlist") was a valid
+    // enum value nothing in the UI could ever set — only governance's
+    // committee-ranking flow could touch priority at all.
+    await page.locator('button:has-text("Edit priority")').click();
+    await page.waitForTimeout(150);
+    await page.locator(".modal select").first().selectOption("watchlist");
+    await page.locator(".modal textarea").fill("CI: exercising the priority editor.");
+    await page.locator('.modal button:has-text("Save")').click();
+    await page.waitForTimeout(300);
+    assert((await page.locator(".status-box").nth(1).locator(".value").textContent()) === "Watchlist", "priority editor sets a non-committee band");
+
+    // Regression guard: "Add dependency" — only "Add risk/issue" existed
+    // before, so a project could never be linked as a blocker/dependency.
+    await page.locator('button:has-text("Add dependency")').click();
+    await page.waitForTimeout(150);
+    await page.locator(".modal select").first().selectOption({ index: 1 });
+    await page.locator(".modal select").nth(1).selectOption("blocks");
+    await page.locator('.modal button:has-text("Add")').click();
+    await page.waitForTimeout(300);
+    assert((await page.locator('.chip:has-text("Blocks")').count()) > 0, "add-dependency creates a visible dependency chip");
+
+    // Regression guard: the "ask a question" flow had no visible answer path
+    // — a question could vanish into history with no attention item and no
+    // way to respond, especially when the submitter wasn't signed in.
+    await withIdentity(page, baseUrl, "ppl_tom", "#/i/ini_insulin_protocol");
+    assert((await page.locator('.text-section:has-text("Open question")').count()) === 1, "seeded unanswered question renders an Open question card");
+    await page.locator('textarea[placeholder="Your answer"]').fill("CI: answering the seeded question.");
+    await page.locator('button:has-text("Post answer")').click();
+    await page.waitForTimeout(300);
+    assert((await page.locator('.text-section:has-text("Open question")').count()) === 0, "posting an answer clears the Open question card");
+    await page.locator('textarea[placeholder="What do you need to know?"]').fill("CI: a fresh question from the detail page.");
+    await page.locator('button:has-text("Send")').click();
+    await page.waitForTimeout(300);
+    assert((await page.locator('.text-section:has-text("Open question")').count()) === 1, "asking a question from the detail page (not just triage) surfaces it again");
+
+    // Regression guard: directors can edit intake fields (title/problem/
+    // departments/sponsor); other roles should not see that control.
+    assert((await page.locator('button:has-text("Edit details")').count()) === 0, "Edit details is hidden for a non-director role");
+    await withIdentity(page, baseUrl, "ppl_marcus", "#/i/ini_ed_ems_interface");
+    const editDetailsBtn = page.locator('button:has-text("Edit details")');
+    assert((await editDetailsBtn.count()) === 1, "Edit details is offered to a director");
+    await editDetailsBtn.click();
+    await page.waitForTimeout(150);
+    await page.locator(".modal input[type=text]").first().fill("CI-edited title");
+    await page.locator('.modal button:has-text("Save")').click();
+    await page.waitForTimeout(300);
+    assert((await page.locator("h1.text-title").textContent()) === "CI-edited title", "director's intake-detail edit is saved");
+
+    // Regression guard: intake's size heuristic was hardcoded to a capital of
+    // 0, so "L" could never be inferred no matter what was answered.
+    await page.goto(baseUrl + "/index.html#/intake");
+    await page.waitForTimeout(250);
+    await page.locator('input[placeholder*="Same-day discharge"]').fill("CI large proposal");
+    await page.locator('textarea[placeholder="What goes wrong today?"]').fill("CI: exercising the size heuristic.");
+    await page.locator('input[placeholder="Optional — only if you have a rough number"]').fill("300000");
+    await page.waitForTimeout(150);
+    const sizeChip = await page.locator(".card.raised").filter({ hasText: "Rough size" }).locator(".chip").last().textContent();
+    assert(sizeChip.trim() === "L", `a $300k capital estimate infers size L (got ${sizeChip})`);
+
     // --- triage ---
     await page.goto(baseUrl + "/index.html#/triage");
     await page.waitForTimeout(250);
