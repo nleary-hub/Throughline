@@ -5,6 +5,11 @@ window.Views.initiative = (() => {
 
   function personName(S, id) { const p = S.people.find(x => x.id === id); return p ? p.name : null; }
 
+  function isDirectorLike(S) {
+    const person = S.people.find(p => p.id === S.me);
+    return !!person && ["director", "senior_director", "peer_director"].includes(person.role);
+  }
+
   function cloneIni(ini) { return JSON.parse(JSON.stringify(ini)); }
 
   async function saveIni(ini, actions) {
@@ -269,7 +274,10 @@ window.Views.initiative = (() => {
     return UI.card([
       UI.el("div", { class: "card-header" }, [
         UI.el("div", { class: "text-section" }, "Risks, issues & dependencies"),
-        UI.button("Add risk/issue", { sm: true, variant: "ghost", onClick: () => openAddRiskModal(S, ini, actions) }),
+        UI.el("div", { style: { display: "flex", gap: "6px", flexWrap: "wrap" } }, [
+          UI.button("Add risk/issue", { sm: true, variant: "ghost", onClick: () => openAddRiskModal(S, ini, actions) }),
+          UI.button("Add dependency", { sm: true, variant: "ghost", onClick: () => openAddDependencyModal(S, ini, actions) }),
+        ]),
       ]),
       UI.el("div", { class: "card-stack" }, items),
     ]);
@@ -372,6 +380,81 @@ window.Views.initiative = (() => {
         }}),
       ],
     });
+  }
+
+  // Most recent question in history, if it has no later "answer" entry —
+  // mirrors Model.attention's question_for_you rule, but for anyone viewing
+  // the page rather than only the person the question was addressed to.
+  // Without this, a question asked of someone who isn't signed in (or who
+  // never opens their attention stream) simply vanishes into the history
+  // feed with no visible way to respond.
+  function openQuestion(ini) {
+    const hist = ini.history || [];
+    for (let i = hist.length - 1; i >= 0; i--) {
+      const h = hist[i];
+      if (h.kind === "question") {
+        const answered = hist.some(x => x.kind === "answer" && x.on > h.on);
+        return answered ? null : h;
+      }
+    }
+    return null;
+  }
+
+  function questionCard(S, ini, actions) {
+    const q = openQuestion(ini);
+    if (!q) return null;
+    const askedBy = personName(S, q.byId);
+    const forPerson = S.people.find(p => p.id === (q.meta || {}).forId);
+    const answerInput = UI.textArea({ placeholder: "Your answer" });
+    return UI.card([
+      UI.el("div", { class: "text-section" }, "Open question"),
+      UI.el("div", { class: "text-body", style: { marginTop: "8px" } }, q.detail || q.summary),
+      UI.el("div", { class: "text-meta", style: { marginTop: "4px" } },
+        `Asked by ${askedBy || "someone"}${forPerson ? ` · for ${forPerson.name}` : ""} · ${UI.fmtDate(q.on.slice(0, 10), { year: true })}`),
+      UI.field("Answer", answerInput),
+      UI.el("div", { style: { display: "flex", justifyContent: "flex-end", marginTop: "8px" } }, [
+        UI.button("Post answer", { variant: "primary", sm: true, onClick: async () => {
+          if (!answerInput.value.trim()) return;
+          const fresh = cloneIni(ini);
+          pushHistory(fresh, { byId: S.me, kind: "answer", summary: answerInput.value.trim(), meta: { answersId: q.id } });
+          await saveIni(fresh, actions);
+          UI.toast("Answer posted.");
+        }}),
+      ]),
+    ], { class: "raised" });
+  }
+
+  function askQuestionCard(S, ini, actions) {
+    const qInput = UI.textArea({ placeholder: "What do you need to know?" });
+    const forSel = UI.select(
+      [{ value: "", label: "General — no one specific" }, ...S.people.map(p => ({ value: p.id, label: p.name }))],
+      { value: (ini.submittedBy && ini.submittedBy.personId) || "" }
+    );
+    const aiBtn = AI.available() ? UI.button("✨ Suggest", { sm: true, variant: "ghost", onClick: async () => {
+      aiBtn.disabled = true;
+      const prompt = `Someone is reviewing this initiative and wants to ask one clarifying question. Reply with ONLY the question itself — one sentence, no preamble, no quotes.\n\nTitle: ${ini.title}\nProblem: ${ini.problem}`;
+      const suggestion = await AI.ask(prompt, { modelTier: "quick" });
+      aiBtn.disabled = false;
+      if (suggestion) qInput.value = suggestion;
+      else UI.toast("AI suggestion isn't available right now.");
+    }}) : null;
+    return UI.card([
+      UI.el("div", { class: "text-section", style: { marginBottom: "8px" } }, "Ask a question"),
+      UI.field("For", forSel, "Optional — who should answer this."),
+      qInput,
+      UI.el("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px" } }, [
+        aiBtn || UI.el("span"),
+        UI.button("Send", { variant: "primary", sm: true, onClick: async () => {
+          if (!qInput.value.trim()) return;
+          const fresh = cloneIni(ini);
+          const asker = S.people.find(p => p.id === S.me);
+          pushHistory(fresh, { byId: S.me, kind: "question", summary: `Question from ${asker ? asker.name : "someone"}.`, detail: qInput.value.trim(), meta: { forId: forSel.value || null } });
+          await saveIni(fresh, actions);
+          qInput.value = "";
+          UI.toast("Question posted.");
+        }}),
+      ]),
+    ]);
   }
 
   function postUpdateCard(S, ini, actions) {
@@ -507,6 +590,153 @@ window.Views.initiative = (() => {
     });
   }
 
+  const PRIORITY_BAND_LABEL = { unranked: "Unranked", watchlist: "Watchlist", committed: "Committed", committee: "Committee-ranked" };
+
+  function openPriorityModal(S, ini, actions) {
+    const p = ini.priority || {};
+    const bandSel = UI.select(Object.entries(PRIORITY_BAND_LABEL).map(([v, l]) => ({ value: v, label: l })), { value: p.band || "unranked" });
+    const rankInput = UI.textInput({ type: "number", min: "1", value: p.rank != null ? String(p.rank) : "" });
+    const holdsInput = UI.textInput({ type: "date", value: p.holdsUntil || "" });
+    const rationaleInput = UI.textArea({ value: p.rationale || "", placeholder: "Why this priority — required for anything but Unranked." });
+    const m = UI.modal({
+      title: "Edit priority",
+      body: UI.el("div", { class: "card-stack" }, [
+        UI.field("Band", bandSel),
+        UI.field("Rank", rankInput, "Only used for Committee-ranked."),
+        UI.field("Holds until", holdsInput),
+        UI.field("Rationale", rationaleInput),
+      ]),
+      footer: [
+        UI.button("Cancel", { variant: "ghost", onClick: () => m.close() }),
+        UI.button("Save", { variant: "primary", onClick: async () => {
+          if (bandSel.value !== "unranked" && !rationaleInput.value.trim()) { UI.toast("A rationale is required for that band."); return; }
+          const fresh = cloneIni(ini);
+          const rank = bandSel.value === "committee" ? (Number(rankInput.value) || null) : null;
+          fresh.priority = { band: bandSel.value, rank, setOn: UI.todayStr(), setBy: S.me, holdsUntil: holdsInput.value || null, rationale: rationaleInput.value.trim() };
+          const valueLabel = bandSel.value === "committee" ? `#${rank || "?"}` : PRIORITY_BAND_LABEL[bandSel.value];
+          pushHistory(fresh, { byId: S.me, kind: "priority_change", summary: `Priority set to ${valueLabel}${rationaleInput.value.trim() ? " — " + rationaleInput.value.trim() : ""}.` });
+          await saveIni(fresh, actions);
+          m.close();
+        }}),
+      ],
+    });
+  }
+
+  function openEditDetailsModal(S, ini, actions) {
+    const titleInput = UI.textInput({ value: ini.title });
+    const problemInput = UI.textArea({ value: ini.problem });
+    let depts = (ini.departments || []).slice();
+    const deptWrap = UI.el("div", { class: "check-row" });
+    function drawDepts() {
+      UI.clear(deptWrap);
+      for (const d of S.config.departments || []) {
+        deptWrap.appendChild(UI.pillOption(d.name, depts.includes(d.id), () => {
+          depts = depts.includes(d.id) ? depts.filter(x => x !== d.id) : [...depts, d.id];
+          drawDepts();
+        }));
+      }
+    }
+    drawDepts();
+    const sponsorSel = UI.select([{ value: "", label: "None" }, ...S.people.filter(p => p.role === "physician").map(p => ({ value: p.id, label: p.name }))], { value: ini.sponsorId || "" });
+
+    const m = UI.modal({
+      title: "Edit intake details",
+      body: UI.el("div", { class: "card-stack" }, [
+        UI.field("Title", titleInput),
+        UI.field("Problem", problemInput),
+        UI.field("Departments", deptWrap),
+        UI.field("Physician sponsor", sponsorSel),
+      ]),
+      footer: [
+        UI.button("Cancel", { variant: "ghost", onClick: () => m.close() }),
+        UI.button("Save", { variant: "primary", onClick: async () => {
+          if (!titleInput.value.trim() || !problemInput.value.trim()) { UI.toast("Title and problem are required."); return; }
+          const fresh = cloneIni(ini);
+          fresh.title = titleInput.value.trim();
+          fresh.problem = problemInput.value.trim();
+          fresh.departments = depts;
+          fresh.sponsorId = sponsorSel.value || null;
+          const editor = S.people.find(p => p.id === S.me);
+          pushHistory(fresh, { byId: S.me, kind: "note", summary: `Intake details edited${editor ? ` by ${editor.name}` : ""}.` });
+          await saveIni(fresh, actions);
+          m.close();
+        }}),
+      ],
+    });
+  }
+
+  function openAddDependencyModal(S, ini, actions) {
+    const others = S.initiatives.filter(i => i.id !== ini.id);
+    const KIND_LABEL = { depends_on: "Depends on", competes_with: "Competes with", blocks: "Blocks" };
+    const targetSel = others.length ? UI.select(others.map(i => ({ value: i.id, label: `${i.title} (${i.ref})` })), {}) : null;
+    const kindSel = others.length ? UI.select(Object.entries(KIND_LABEL).map(([v, l]) => ({ value: v, label: l })), {}) : null;
+    const noteInput = UI.textInput({ placeholder: "Note (optional)" });
+
+    const aiWrap = UI.el("div", { style: { marginTop: "8px" } });
+    function drawAiButton() {
+      UI.clear(aiWrap);
+      if (!AI.available() || !others.length) return;
+      aiWrap.appendChild(UI.button("✨ Suggest related initiatives", { sm: true, variant: "ghost", onClick: suggestRelated }));
+    }
+    async function suggestRelated() {
+      UI.clear(aiWrap);
+      aiWrap.appendChild(UI.el("div", { class: "text-meta" }, "Checking for related initiatives…"));
+      const prompt = `Given this initiative, identify which of the other initiatives below (if any) it likely depends on, competes with, or is blocked by. Respond with ONLY a JSON array (no prose) — at most 3 items, only real likely matches, an empty array is a fine answer. Each item: {"ref":"...","kind":"depends_on|competes_with|blocks","reason":"one short sentence"}.
+
+This initiative:
+${ini.title} — ${ini.problem}
+
+Other initiatives:
+${others.map(o => `${o.ref}: ${o.title} — ${o.problem}`).join("\n")}`;
+      const suggestions = await AI.askJson(prompt, { modelTier: "quick", maxTokens: 600 });
+      UI.clear(aiWrap);
+      if (!Array.isArray(suggestions) || !suggestions.length) {
+        aiWrap.appendChild(UI.el("div", { class: "text-meta" }, "No likely matches found."));
+        drawAiButton();
+        return;
+      }
+      for (const s of suggestions) {
+        const match = others.find(o => o.ref === s.ref);
+        if (!match) continue;
+        const kindLabel = KIND_LABEL[s.kind] || s.kind;
+        aiWrap.appendChild(UI.el("div", { class: "card", style: { marginTop: "6px" } }, [
+          UI.el("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" } }, [
+            UI.el("div", {}, [UI.el("div", { class: "text-body", style: { fontWeight: 600 } }, `${kindLabel}: ${match.title}`), UI.el("div", { class: "text-meta" }, s.reason || "")]),
+            UI.button("Use", { sm: true, onClick: () => {
+              targetSel.value = match.id;
+              kindSel.value = KIND_LABEL[s.kind] ? s.kind : "depends_on";
+              noteInput.value = s.reason || "";
+              UI.toast("Filled in above — review and Add.");
+            }}),
+          ]),
+        ]));
+      }
+    }
+    drawAiButton();
+
+    const m = UI.modal({
+      title: "Add dependency",
+      body: UI.el("div", { class: "card-stack" }, [
+        others.length
+          ? UI.el("div", { class: "card-stack" }, [UI.field("Related initiative", targetSel), UI.field("Relationship", kindSel), UI.field("Note", noteInput)])
+          : UI.el("div", { class: "text-body muted" }, "No other initiatives exist yet to link this to."),
+        aiWrap,
+      ]),
+      footer: [
+        UI.button("Cancel", { variant: "ghost", onClick: () => m.close() }),
+        others.length ? UI.button("Add", { variant: "primary", onClick: async () => {
+          const fresh = cloneIni(ini);
+          fresh.dependencies = fresh.dependencies || [];
+          fresh.dependencies.push({ initiativeId: targetSel.value, kind: kindSel.value, note: noteInput.value.trim() });
+          const target = others.find(o => o.id === targetSel.value);
+          pushHistory(fresh, { byId: S.me, kind: "note", summary: `Linked — ${KIND_LABEL[kindSel.value].toLowerCase()} ${target ? target.title : targetSel.value}.` });
+          await saveIni(fresh, actions);
+          m.close();
+        }}) : null,
+      ],
+    });
+  }
+
   function openClassificationModal(S, ini, actions) {
     const typeSel = UI.select(Object.entries(Model.TYPE_LABEL).map(([v, l]) => ({ value: v, label: l })), { value: ini.type });
     const trackSel = UI.select(Object.entries(Model.TRACK_LABEL).map(([v, l]) => ({ value: v, label: l })), { value: ini.track });
@@ -579,6 +809,7 @@ window.Views.initiative = (() => {
           ini.size ? UI.chip(ini.size, "steel") : null,
           ini.demo ? UI.chip("Demo", "iris") : null,
           UI.button("Edit classification", { sm: true, variant: "ghost", onClick: () => openClassificationModal(S, ini, actions) }),
+          isDirectorLike(S) ? UI.button("Edit details", { sm: true, variant: "ghost", onClick: () => openEditDetailsModal(S, ini, actions) }) : null,
         ]),
         UI.el("h1", { class: "text-title" }, ini.title),
         UI.el("div", { class: "text-body muted", style: { marginTop: "6px", maxWidth: "640px" } }, ini.problem),
@@ -587,13 +818,16 @@ window.Views.initiative = (() => {
     ]));
 
     wrap.appendChild(statusRow(S, ini));
+    wrap.appendChild(UI.button("Edit priority", { sm: true, variant: "ghost", onClick: () => openPriorityModal(S, ini, actions) }));
     wrap.appendChild(nextActionBanner(S, ini, actions));
 
     const outcome = outcomeCard(S, ini, actions);
+    const question = questionCard(S, ini, actions);
 
     const grid = UI.el("div", { class: "split-grid", style: { gridTemplateColumns: "2fr 1fr" } });
 
     const left = UI.el("div", { class: "region-gap" });
+    if (question) left.appendChild(question);
     if (outcome) left.appendChild(outcome);
     left.appendChild(requirementsSection(S, ini, actions));
     left.appendChild(milestonesSection(S, ini, actions));
@@ -603,6 +837,7 @@ window.Views.initiative = (() => {
     const right = UI.el("div", { class: "region-gap" });
     right.appendChild(peopleCard(S, ini, actions));
     right.appendChild(postUpdateCard(S, ini, actions));
+    right.appendChild(askQuestionCard(S, ini, actions));
 
     grid.appendChild(left);
     grid.appendChild(right);

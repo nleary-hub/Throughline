@@ -137,6 +137,28 @@ window.Views.settings = (() => {
     ]);
   }
 
+  function aiSection(S, actions) {
+    const liveCap = AI.hasLiveCapability();
+    const hasKey = !!AI.getKey();
+    const keyInput = UI.textInput({ type: "password", placeholder: liveCap ? "Not needed here" : "sk-ant-...", value: hasKey ? "••••••••••••••••" : "" });
+    let dirty = false;
+    keyInput.addEventListener("input", () => { dirty = true; });
+    return UI.card([
+      UI.el("div", { class: "text-section" }, "AI assist"),
+      UI.el("div", { class: "text-meta", style: { margin: "4px 0 10px" } },
+        liveCap
+          ? "Running inside claude.ai — AI-drafted suggestions in Propose, Triage, and dependencies use Claude automatically. Every suggestion is reviewed and explicitly applied by a person; nothing is ever saved automatically."
+          : "Optional. Add an Anthropic API key to enable AI-drafted suggestions in Propose, Triage, and dependencies. Every suggestion is reviewed and explicitly applied by a person — nothing is ever saved automatically. The key is stored only in this browser, never in the shared app data, and is sent only directly to Anthropic's API."),
+      liveCap ? null : UI.field("Anthropic API key", keyInput),
+      liveCap ? null : UI.button("Save", { sm: true, variant: "primary", style: { marginTop: "10px" }, onClick: () => {
+        if (!dirty) { UI.toast("No change."); return; }
+        const v = keyInput.value.trim();
+        AI.setKey(v);
+        UI.toast(v ? "Key saved." : "Key removed.");
+      }}),
+    ]);
+  }
+
   function demoSection(S, actions) {
     return UI.card([
       UI.el("div", { class: "text-section" }, "Demo data"),
@@ -169,6 +191,7 @@ window.Views.settings = (() => {
     wrap.appendChild(deptSection(S, actions));
     wrap.appendChild(rulesSection(S, actions));
     wrap.appendChild(attentionSection(S, actions));
+    wrap.appendChild(aiSection(S, actions));
     wrap.appendChild(demoSection(S, actions));
     return wrap;
   }

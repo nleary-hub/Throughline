@@ -54,6 +54,14 @@ Plain JS, no framework, no bundler:
 - `js/seed.js` — demo dataset for local mode, computed through the same
   requirement rule engine as real data so it stays consistent with the
   rules in Settings.
+- `js/ai.js` — the only file that calls an LLM. Mirrors `js/store.js`'s
+  live/standalone split: `window.claude.use("sample")` when running as a
+  Claude Artifact, otherwise a bring-your-own-key call straight to the
+  Anthropic API (key entered in Settings, stored only in that browser's
+  `localStorage`, never synced to the shared app data). Every call is a
+  suggestion a person reviews and explicitly applies — nothing here
+  writes to the Store on its own, and every call site degrades to "AI
+  suggestions aren't available" on any failure or missing key.
 - `js/ui.js` — DOM-building primitives (`el`, `card`, `chip`, `modal`,
   `toast`, formatting helpers). No store access, no routing.
 - `js/app.js` — boot, hash router, global state, the nav rail.
@@ -73,15 +81,28 @@ scratch on every change rather than patched in place.
   contributors.
 - **Initiatives** — filterable list or Kanban board, saved views (at
   risk, blocked, mine, unassigned).
-- **Initiative detail** — requirements & approvals, milestones, risks &
-  dependencies, decision history, next action, people, outcome.
+- **Initiative detail** — requirements & approvals (editable classification
+  that re-evaluates them), priority, milestones, risks & dependencies
+  (including linking another initiative as a blocker/competitor, with an
+  optional AI pass over the other open initiatives to suggest likely
+  matches), decision history, next action, people, outcome, and an
+  open-question / answer thread visible to anyone viewing the page —
+  directors can also edit the core intake fields (title, problem,
+  departments, sponsor) here. "Edit classification" re-runs the
+  requirement rule engine and reports what newly applies or no longer
+  does.
 - **Propose** — two-step intake with a live preview of the requirements
-  it will likely trigger.
+  and rough size it will likely trigger, plus an optional AI pass that
+  reads the free-text problem and suggests type/departments/answers to
+  review before applying.
 - **Triage** — director queue for incoming proposals: classify, accept,
-  ask a question, or decline.
+  ask a question (optionally AI-drafted), or decline.
 - **Governance session** — score and rank a committee slate, record
   decisions, publish.
 - **Reviews** — upcoming/past meetings and a generated briefing.
 - **Archive** — closed, declined, and deferred initiatives with outcomes.
-- **Settings** — people/roles, departments/areas, rule thresholds,
-  attention thresholds, demo data.
+- **Settings** — people/roles (adding a person is wired up; editing or
+  removing an existing one isn't, since that would need to reassign or
+  archive everything already attributed to them), departments/areas, rule
+  thresholds, attention thresholds, AI assist (Anthropic API key), demo
+  data.
