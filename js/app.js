@@ -101,7 +101,9 @@ const App = (() => {
     const left = UI.el("div", { style: { display: "flex", alignItems: "center", gap: "10px" } }, [
       UI.button("☰", { variant: "ghost", sm: true, onClick: toggleRail, }),
     ]);
-    left.querySelector("button").classList.add("rail-toggle");
+    const railToggle = left.querySelector("button");
+    railToggle.classList.add("rail-toggle");
+    railToggle.setAttribute("aria-label", "Toggle navigation menu");
     left.appendChild(UI.el("div", { class: "page-title" }, pageTitle()));
     bar.appendChild(left);
     bar.appendChild(UI.el("div", { class: "topbar-actions" }));

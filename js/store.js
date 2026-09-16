@@ -214,6 +214,18 @@ const Store = (() => {
       if (localStorageAvailable()) {
         mode = "local";
         setupLocalStore();
+        // Another tab/window writing to the same origin fires a "storage"
+        // event here (never in the tab that made the write) — pick up its
+        // change instead of silently diverging until the next reload.
+        window.addEventListener("storage", (e) => {
+          if (e.key !== LS_KEY || mode !== "local") return;
+          try {
+            loadIntoCache(e.newValue ? JSON.parse(e.newValue) : { people: [] });
+            notify();
+          } catch (err) {
+            console.error("Store: failed to apply cross-tab update", err);
+          }
+        });
         return { ok: true, mode: "local" };
       }
 

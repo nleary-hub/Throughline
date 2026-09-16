@@ -54,16 +54,25 @@ window.Views.home = (() => {
     for (const bucket of Model.BUCKET_ORDER) {
       const inBucket = items.filter(i => i.bucket === bucket);
       if (!inBucket.length) continue;
-      const shown = inBucket.slice(0, 6);
       const bwrap = UI.el("div", { class: "attn-bucket" });
       bwrap.appendChild(UI.el("div", { class: "attn-bucket-title" }, [
         UI.chip(Model.BUCKET_LABEL[bucket], BUCKET_TINT[bucket]),
         UI.el("span", { class: "text-meta" }, `${inBucket.length}`),
       ]));
-      for (const item of shown) bwrap.appendChild(attentionItemRow(S, actions, item));
-      if (inBucket.length > 6) {
-        bwrap.appendChild(UI.button(`Show all ${inBucket.length}`, { sm: true, variant: "ghost" }));
+      const itemsWrap = UI.el("div", { class: "card-stack" });
+      const moreWrap = UI.el("div");
+      function drawItems(expanded) {
+        UI.clear(itemsWrap);
+        const shown = expanded ? inBucket : inBucket.slice(0, 6);
+        for (const item of shown) itemsWrap.appendChild(attentionItemRow(S, actions, item));
+        UI.clear(moreWrap);
+        if (!expanded && inBucket.length > 6) {
+          moreWrap.appendChild(UI.button(`Show all ${inBucket.length}`, { sm: true, variant: "ghost", onClick: () => drawItems(true) }));
+        }
       }
+      drawItems(false);
+      bwrap.appendChild(itemsWrap);
+      bwrap.appendChild(moreWrap);
       wrap.appendChild(bwrap);
     }
 
@@ -220,8 +229,7 @@ window.Views.home = (() => {
     const wrap = UI.el("div", { class: "page-body" });
     wrap.appendChild(UI.el("h1", { class: "text-title" }, `Welcome back, ${person.name.split(" ")[0]}`));
 
-    const grid = UI.el("div", { style: { display: "grid", gridTemplateColumns: "2fr 1fr", gap: "16px", alignItems: "start" } });
-    if (window.innerWidth <= 900) grid.style.gridTemplateColumns = "1fr";
+    const grid = UI.el("div", { class: "split-grid", style: { gridTemplateColumns: "2fr 1fr" } });
     const left = UI.el("div", { class: "region-gap" });
     left.appendChild(attentionStream(S, actions, person.id));
     const right = UI.el("div", { class: "region-gap" });

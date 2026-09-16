@@ -58,8 +58,7 @@ window.Views.intake = (() => {
     };
 
     const wrap = UI.el("div", { class: "page-body" });
-    const grid = UI.el("div", { style: { display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: "16px", alignItems: "start" } });
-    if (window.innerWidth <= 900) grid.style.gridTemplateColumns = "1fr";
+    const grid = UI.el("div", { class: "split-grid", style: { gridTemplateColumns: "1.4fr 1fr" } });
     const formCol = UI.el("div");
     const previewCol = UI.el("div");
     grid.appendChild(formCol);

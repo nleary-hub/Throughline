@@ -78,15 +78,16 @@ window.Views.governance = (() => {
       slateWrap.appendChild(UI.el("div", { class: "text-section" }, "Rankable slate"));
       const list = UI.el("div", { class: "card-stack", style: { marginTop: "8px" } });
       slate.forEach((ini, idx) => {
+        const upBtn = UI.button("↑", { sm: true, variant: "ghost", disabled: idx === 0, onClick: () => { [slate[idx - 1], slate[idx]] = [slate[idx], slate[idx - 1]]; drawSlate(); } });
+        upBtn.setAttribute("aria-label", `Move ${ini.title} up`);
+        const downBtn = UI.button("↓", { sm: true, variant: "ghost", disabled: idx === slate.length - 1, onClick: () => { [slate[idx + 1], slate[idx]] = [slate[idx], slate[idx + 1]]; drawSlate(); } });
+        downBtn.setAttribute("aria-label", `Move ${ini.title} down`);
         list.appendChild(UI.el("div", { class: "card", style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } }, [
           UI.el("div", { style: { display: "flex", alignItems: "center", gap: "8px" } }, [
             UI.chip(`#${idx + 1}`, "iris"),
             UI.el("span", { class: "text-body" }, ini.title),
           ]),
-          UI.el("div", { style: { display: "flex", gap: "4px" } }, [
-            UI.button("↑", { sm: true, variant: "ghost", disabled: idx === 0, onClick: () => { [slate[idx - 1], slate[idx]] = [slate[idx], slate[idx - 1]]; drawSlate(); } }),
-            UI.button("↓", { sm: true, variant: "ghost", disabled: idx === slate.length - 1, onClick: () => { [slate[idx + 1], slate[idx]] = [slate[idx], slate[idx + 1]]; drawSlate(); } }),
-          ]),
+          UI.el("div", { style: { display: "flex", gap: "4px" } }, [upBtn, downBtn]),
         ]));
       });
       slateWrap.appendChild(list);
@@ -149,8 +150,7 @@ window.Views.governance = (() => {
     }
 
     wrap.appendChild(UI.card([tableWrap]));
-    const bottomGrid = UI.el("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", alignItems: "start" } });
-    if (window.innerWidth <= 900) bottomGrid.style.gridTemplateColumns = "1fr";
+    const bottomGrid = UI.el("div", { class: "split-grid", style: { gridTemplateColumns: "1fr 1fr" } });
     bottomGrid.appendChild(UI.card([slateWrap]));
     const rightCol = UI.el("div", { class: "region-gap" });
     rightCol.appendChild(decisionWrap);

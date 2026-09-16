@@ -331,8 +331,15 @@ input::placeholder,textarea::placeholder{color:var(--text-3);}
 .hist-item .hsummary{font-size:12px;}
 .hist-item .hmeta{font-size:10.5px; color:var(--text-3); margin-top:1px;}
 
+/* ===== two-column page layouts (home, intake, initiative detail, governance) =====
+   Ratio is set inline per view; the media query forces a single column on
+   narrow viewports and reacts live to resize/rotation, unlike a one-time
+   window.innerWidth check made at render time. */
+.split-grid{display:grid; gap:16px; align-items:start;}
+
 /* ===== responsive ===== */
 @media (max-width:900px){
+  .split-grid{grid-template-columns:1fr !important;}
   .rail{position:fixed; left:0; top:0; z-index:40; transform:translateX(-100%); transition:transform .18s ease; background:var(--ink-900); box-shadow:0 0 40px rgba(0,0,0,.5);}
   .rail.open{transform:translateX(0);}
   .rail-toggle{display:inline-flex;}

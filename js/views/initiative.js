@@ -32,7 +32,7 @@ window.Views.initiative = (() => {
     const h = Model.health(ini, null, S.config);
 
     const readinessSub = r.value === "ready" ? "All requirements clear" :
-      r.keys.map(k => Model.REQ_LABEL[k] || k).join(", ");
+      r.keys.map(k => Model.REQ_LABEL[k] || k).join(", ") + (ini.readinessOverride ? ` — overridden: ${ini.readinessOverride.reason}` : "");
 
     const healthSub = h && h.override ? `Override: ${h.reason}` : (h && h.value === "stalled" ? "No update recently" : "");
 
@@ -409,9 +409,31 @@ window.Views.initiative = (() => {
         await saveIni(fresh, actions);
       }}),
       !gate.ok ? UI.el("span", { class: "text-meta" }, gate.reason) : null,
+      !gate.ok && gate.needsOverride ? UI.button("Override & advance", { sm: true, variant: "ghost", onClick: () => openOverrideModal(S, ini, actions, next) }) : null,
       ini.stage !== "declined" && ini.stage !== "deferred" && ini.stage !== "closed" ? UI.button("Decline", { sm: true, variant: "ghost", onClick: () => openDeclineModal(S, ini, actions, "declined") }) : null,
       ini.stage !== "declined" && ini.stage !== "deferred" && ini.stage !== "closed" ? UI.button("Defer", { sm: true, variant: "ghost", onClick: () => openDeclineModal(S, ini, actions, "deferred") }) : null,
     ]);
+  }
+
+  function openOverrideModal(S, ini, actions, next) {
+    const reasonInput = UI.textArea({ placeholder: "Why advance before readiness is Ready? (required — kept on the record)" });
+    const m = UI.modal({
+      title: "Director override",
+      body: UI.field("Reason", reasonInput),
+      footer: [
+        UI.button("Cancel", { variant: "ghost", onClick: () => m.close() }),
+        UI.button("Override & advance", { variant: "danger", onClick: async () => {
+          if (!reasonInput.value.trim()) { UI.toast("A reason is required."); return; }
+          const fresh = cloneIni(ini);
+          fresh.readinessOverride = { reason: reasonInput.value.trim(), byId: S.me, on: UI.todayStr() };
+          fresh.stage = next;
+          fresh.stageEnteredOn = UI.todayStr();
+          pushHistory(fresh, { byId: S.me, kind: "stage_change", summary: `Moved to ${Model.STAGE_LABEL[next]} via director override — ${reasonInput.value.trim()}`, meta: { from: ini.stage, to: next, override: true } });
+          await saveIni(fresh, actions);
+          m.close();
+        }}),
+      ],
+    });
   }
 
   function openDeclineModal(S, ini, actions, toStage) {
@@ -485,6 +507,64 @@ window.Views.initiative = (() => {
     });
   }
 
+  function openClassificationModal(S, ini, actions) {
+    const typeSel = UI.select(Object.entries(Model.TYPE_LABEL).map(([v, l]) => ({ value: v, label: l })), { value: ini.type });
+    const trackSel = UI.select(Object.entries(Model.TRACK_LABEL).map(([v, l]) => ({ value: v, label: l })), { value: ini.track });
+    const sizeSel = UI.select([{ value: "", label: "Not set" }, { value: "S", label: "S" }, { value: "M", label: "M" }, { value: "L", label: "L" }], { value: ini.size || "" });
+    const capitalInput = UI.textInput({ type: "number", min: "0", value: String((ini.estimates || {}).capital || 0) });
+    const fteInput = UI.textInput({ type: "number", min: "0", value: String((ini.estimates || {}).fte || 0) });
+    const crosses = { value: !!(ini.estimates || {}).crossesServiceLines };
+    const crossesBtn = UI.pillOption("Crosses service lines", crosses.value, () => { crosses.value = !crosses.value; crossesBtn.classList.toggle("selected", crosses.value); });
+    const intake = Object.assign({ needsSupplies: "unsure", needsSoftware: false, newProcedure: false }, ini.intakeAnswers || {});
+    function pillGroup(field, options) {
+      const row = UI.el("div", { class: "radio-row" });
+      function draw() {
+        UI.clear(row);
+        for (const opt of options) row.appendChild(UI.pillOption(opt.label, intake[field] === opt.value, () => { intake[field] = opt.value; draw(); }));
+      }
+      draw();
+      return row;
+    }
+
+    const m = UI.modal({
+      title: "Edit classification",
+      body: UI.el("div", { class: "card-stack" }, [
+        UI.field("Type", typeSel), UI.field("Track", trackSel), UI.field("Size", sizeSel),
+        UI.el("div", { style: { display: "flex", gap: "10px" } }, [UI.field("Capital ($)", capitalInput), UI.field("FTE", fteInput)]),
+        crossesBtn,
+        UI.field("Needs new supplies or devices?", pillGroup("needsSupplies", [{ value: "no", label: "No" }, { value: "unsure", label: "Not sure" }, { value: "yes", label: "Yes" }])),
+        UI.field("Needs new software or a system interface?", pillGroup("needsSoftware", [{ value: false, label: "No" }, { value: true, label: "Yes" }])),
+        UI.field("Introduces a new procedure?", pillGroup("newProcedure", [{ value: false, label: "No" }, { value: true, label: "Yes" }])),
+        UI.el("div", { class: "text-meta" }, "Saving re-evaluates which requirements apply. Existing statuses and history on requirements that still apply are kept; ones that no longer apply are marked not required rather than deleted."),
+      ]),
+      footer: [
+        UI.button("Cancel", { variant: "ghost", onClick: () => m.close() }),
+        UI.button("Save", { variant: "primary", onClick: async () => {
+          const fresh = cloneIni(ini);
+          fresh.type = typeSel.value;
+          fresh.track = trackSel.value;
+          fresh.size = sizeSel.value || null;
+          fresh.estimates = { capital: Math.max(0, Number(capitalInput.value) || 0), fte: Math.max(0, Number(fteInput.value) || 0), crossesServiceLines: crosses.value };
+          fresh.intakeAnswers = intake;
+
+          const beforeKeys = new Set((ini.requirements || []).filter(r => r.status !== "not_required").map(r => r.key));
+          fresh.requirements = Model.reconcileRequirements(fresh, S.config);
+          const afterKeys = new Set(fresh.requirements.filter(r => r.status !== "not_required").map(r => r.key));
+          const added = [...afterKeys].filter(k => !beforeKeys.has(k)).map(k => Model.REQ_LABEL[k] || k);
+          const removed = [...beforeKeys].filter(k => !afterKeys.has(k)).map(k => Model.REQ_LABEL[k] || k);
+          let summary = "Classification updated.";
+          if (added.length || removed.length) {
+            summary = "Reclassified — requirements re-evaluated: " +
+              [added.length ? `now applies: ${added.join(", ")}` : null, removed.length ? `no longer applies: ${removed.join(", ")}` : null].filter(Boolean).join("; ") + ".";
+          }
+          pushHistory(fresh, { byId: S.me, kind: "requirement_change", summary });
+          await saveIni(fresh, actions);
+          m.close();
+        }}),
+      ],
+    });
+  }
+
   function render(S, actions, id) {
     const ini = S.initiatives.find(i => i.id === id);
     if (!ini) return UI.emptyState("Initiative not found", "It may have been removed, or the link is out of date.");
@@ -493,11 +573,12 @@ window.Views.initiative = (() => {
 
     wrap.appendChild(UI.el("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", flexWrap: "wrap" } }, [
       UI.el("div", {}, [
-        UI.el("div", { style: { display: "flex", gap: "8px", alignItems: "center", marginBottom: "6px" } }, [
+        UI.el("div", { style: { display: "flex", gap: "8px", alignItems: "center", marginBottom: "6px", flexWrap: "wrap" } }, [
           UI.el("span", { class: "mono-label" }, ini.ref),
           UI.chip(Model.TYPE_LABEL[ini.type] || "Type not set", "neutral"),
           ini.size ? UI.chip(ini.size, "steel") : null,
           ini.demo ? UI.chip("Demo", "iris") : null,
+          UI.button("Edit classification", { sm: true, variant: "ghost", onClick: () => openClassificationModal(S, ini, actions) }),
         ]),
         UI.el("h1", { class: "text-title" }, ini.title),
         UI.el("div", { class: "text-body muted", style: { marginTop: "6px", maxWidth: "640px" } }, ini.problem),
@@ -510,8 +591,7 @@ window.Views.initiative = (() => {
 
     const outcome = outcomeCard(S, ini, actions);
 
-    const grid = UI.el("div", { style: { display: "grid", gridTemplateColumns: "2fr 1fr", gap: "16px", alignItems: "start" } });
-    if (window.innerWidth <= 900) grid.style.gridTemplateColumns = "1fr";
+    const grid = UI.el("div", { class: "split-grid", style: { gridTemplateColumns: "2fr 1fr" } });
 
     const left = UI.el("div", { class: "region-gap" });
     if (outcome) left.appendChild(outcome);

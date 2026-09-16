@@ -91,6 +91,45 @@ async function main() {
     assert((await page.locator("h1.text-title").textContent()).includes("PCI"), "initiative detail renders title");
     assert((await page.locator(".status-box").count()) === 4, "initiative detail shows the 4 status boxes");
 
+    // Regression guard: no horizontal scroll at phone width (a flex row here
+    // once overflowed once "Edit classification" was added without wrapping).
+    await page.setViewportSize({ width: 375, height: 700 });
+    await page.waitForTimeout(100);
+    const overflowsAtPhoneWidth = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 2);
+    assert(!overflowsAtPhoneWidth, "initiative detail has no horizontal overflow at 375px width");
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.waitForTimeout(100);
+
+    // Regression guard: modal opens (Escape-to-close) and Edit classification exists.
+    await page.locator('button:has-text("Edit classification")').click();
+    await page.waitForTimeout(150);
+    assert((await page.locator(".modal-backdrop").count()) === 1, "edit classification modal opens");
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(150);
+    assert((await page.locator(".modal-backdrop").count()) === 0, "Escape key closes the modal");
+
+    // Regression guard: director override is reachable when readiness isn't ready.
+    await withIdentity(page, baseUrl, "ppl_priya", "#/i/ini_or_block_time");
+    const overrideBtn = page.locator('button:has-text("Override & advance")');
+    assert((await overrideBtn.count()) > 0, "override control is offered when readiness blocks advancing");
+    await overrideBtn.first().click();
+    await page.waitForTimeout(150);
+    await page.locator(".modal textarea").fill("CI: exercising the override path.");
+    await page.locator('.modal button:has-text("Override & advance")').click();
+    await page.waitForTimeout(300);
+    assert((await page.locator(".status-box .value").first().textContent()) === "In flight", "override advances the stage");
+
+    // Regression guard: editing classification re-runs the requirement rule engine.
+    await page.goto(baseUrl + "/index.html#/i/ini_hybrid_or");
+    await page.waitForTimeout(200);
+    await page.locator('button:has-text("Edit classification")').click();
+    await page.waitForTimeout(150);
+    await page.locator(".modal select").first().selectOption("process_improvement");
+    await page.locator('.modal button:has-text("Save")').click();
+    await page.waitForTimeout(300);
+    const classHistory = await page.locator(".hbody .hsummary").first().textContent();
+    assert(classHistory.includes("Reclassified"), `classification edit re-evaluates requirements (got: ${classHistory})`);
+
     // --- triage ---
     await page.goto(baseUrl + "/index.html#/triage");
     await page.waitForTimeout(250);
@@ -105,6 +144,16 @@ async function main() {
     const briefing = await page.locator("pre").textContent();
     assert(briefing.startsWith("# Physician Governance Committee"), "closed meeting briefing generates");
 
+    // Regression guard: the Export summary button must actually exist (its id
+    // was silently dropped by UI.button for every option except a few) and
+    // trigger a real download when the claude.ai downloads capability isn't present.
+    assert((await page.locator("#export-btn").count()) === 1, "export-summary button carries its id");
+    const [download] = await Promise.all([
+      page.waitForEvent("download", { timeout: 5000 }),
+      page.locator("#export-btn").click(),
+    ]);
+    assert(download.suggestedFilename() === "mtg_aug.md", `export produces the expected filename (got ${download.suggestedFilename()})`);
+
     // --- governance session ---
     await withIdentity(page, baseUrl, "ppl_dana", "#/governance/mtg_sep");
     assert((await page.locator("h1.text-title").textContent()).includes("September"), "governance session renders");
@@ -118,6 +167,14 @@ async function main() {
     await page.goto(baseUrl + "/index.html#/settings");
     await page.waitForTimeout(250);
     assert((await page.locator("h1.text-title").textContent()) === "Settings", "settings renders");
+
+    // Regression guard: adding a person actually persists and shows up.
+    await page.locator('button:has-text("Add person")').click();
+    await page.waitForTimeout(150);
+    await page.locator(".modal input").first().fill("CI Test Person");
+    await page.locator(".modal button:has-text(\"Add\")").click();
+    await page.waitForTimeout(300);
+    assert((await page.locator("text=CI Test Person").count()) > 0, "newly added person appears in Settings");
 
     // --- intake: full submit flow shows the confirmation (regression guard) ---
     await page.goto(baseUrl + "/index.html#/intake");

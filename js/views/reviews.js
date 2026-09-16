@@ -112,12 +112,28 @@ window.Views.reviews = (() => {
     const pre = UI.el("pre", { style: { whiteSpace: "pre-wrap", fontFamily: "var(--font-mono)", fontSize: "11.5px", lineHeight: "1.7" } }, md);
     wrap.appendChild(UI.card([pre]));
 
+    function downloadViaBlob() {
+      const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${mtg.id}.md`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
     setTimeout(async () => {
       const btn = wrap.querySelector("#export-btn");
       if (!btn) return;
       const downloads = (window.claude && typeof window.claude.use === "function") ? await window.claude.use("downloads") : null;
-      if (!downloads) { btn.hidden = true; return; }
       btn.addEventListener("click", async () => {
+        if (!downloads) {
+          downloadViaBlob();
+          UI.toast("Summary downloaded.");
+          return;
+        }
         try {
           await downloads.save({ filename: `${mtg.id}.md`, data: md });
           UI.toast("Summary saved.");

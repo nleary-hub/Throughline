@@ -135,7 +135,7 @@ const Model = (() => {
         result.push({ ...cur, because: a.because, becauseCode: a.becauseCode });
       } else {
         result.push({
-          key: a.key, status: a.key === "senior_director" && ini.__sdAwaiting ? "awaiting_decision" : "not_started",
+          key: a.key, status: "not_started",
           responsibleId: null, externalContact: "", submittedOn: null, decidedOn: null,
           lastCheckedOn: null, because: a.because, becauseCode: a.becauseCode, rationale: "", addedManually: false,
         });
@@ -220,7 +220,7 @@ const Model = (() => {
         return { ok: true };
       case "in_flight": {
         const r = readiness(ini);
-        if (r.value !== "ready" && !ini.__readinessOverride) {
+        if (r.value !== "ready" && !ini.readinessOverride) {
           return { ok: false, reason: "Readiness must be Ready before In flight — or record a director override with a reason.", needsOverride: true };
         }
         return { ok: true };

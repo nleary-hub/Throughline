@@ -37,8 +37,11 @@ const UI = (() => {
   function parseDate(s) {
     if (!s) return null;
     // 'YYYY-MM-DD' -> local date, no TZ surprises
-    const [y, m, d] = s.split("-").map(Number);
-    return new Date(y, m - 1, d);
+    const parts = String(s).split("-").map(Number);
+    if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return null;
+    const [y, m, d] = parts;
+    const dt = new Date(y, m - 1, d);
+    return Number.isNaN(dt.getTime()) ? null : dt;
   }
 
   function fmtDate(s, opts) {
@@ -55,7 +58,13 @@ const UI = (() => {
   function daysBetween(a, b) {
     const da = typeof a === "string" ? parseDate(a) : a;
     const db_ = typeof b === "string" ? parseDate(b) : b;
-    return Math.round((db_ - da) / 86400000);
+    if (!da || !db_ || Number.isNaN(da.getTime && da.getTime()) || Number.isNaN(db_.getTime && db_.getTime())) return 0;
+    // Diff whole UTC day numbers rather than raw Date objects so a DST
+    // transition between the two dates can't shift the result by an hour
+    // and round to the wrong day count.
+    const utcA = Date.UTC(da.getFullYear(), da.getMonth(), da.getDate());
+    const utcB = Date.UTC(db_.getFullYear(), db_.getMonth(), db_.getDate());
+    return Math.round((utcB - utcA) / 86400000);
   }
 
   function fmtDuration(days) {
@@ -101,7 +110,7 @@ const UI = (() => {
   function button(label, opts) {
     opts = opts || {};
     const cls = ["btn", opts.variant, opts.sm ? "sm" : ""].filter(Boolean).join(" ");
-    const b = el("button", { class: cls, onClick: opts.onClick, disabled: opts.disabled, title: opts.title }, [label]);
+    const b = el("button", { class: cls, onClick: opts.onClick, disabled: opts.disabled, title: opts.title, id: opts.id }, [label]);
     return b;
   }
 
@@ -158,10 +167,12 @@ const UI = (() => {
   function modal(opts) {
     opts = opts || {};
     const backdrop = el("div", { class: "modal-backdrop" });
-    const box = el("div", { class: "modal" });
+    const box = el("div", { class: "modal", role: "dialog", "aria-modal": "true", "aria-label": opts.title || "Dialog", tabindex: "-1" });
+    const closeBtn = button("✕", { variant: "ghost", sm: true, onClick: () => close() });
+    closeBtn.setAttribute("aria-label", "Close dialog");
     const header = el("div", { class: "modal-header" }, [
       el("div", { class: "text-section" }, opts.title || ""),
-      button("✕", { variant: "ghost", sm: true, onClick: () => close() }),
+      closeBtn,
     ]);
     box.appendChild(header);
     const body = el("div", { class: "modal-body" });
@@ -173,11 +184,16 @@ const UI = (() => {
     }
     backdrop.appendChild(box);
     backdrop.addEventListener("click", (e) => { if (e.target === backdrop) close(); });
+    function onKeydown(e) { if (e.key === "Escape") close(); }
+    document.addEventListener("keydown", onKeydown);
     function close() {
+      document.removeEventListener("keydown", onKeydown);
       if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
       if (opts.onClose) opts.onClose();
     }
     document.body.appendChild(backdrop);
+    const firstField = box.querySelector("input, textarea, select");
+    (firstField || box).focus({ preventScroll: true });
     return { close, box, body };
   }
 
@@ -202,7 +218,7 @@ const UI = (() => {
 
   function textInput(opts) {
     opts = opts || {};
-    return el("input", { type: opts.type || "text", value: opts.value || "", placeholder: opts.placeholder || "", id: opts.id, onInput: opts.onInput });
+    return el("input", { type: opts.type || "text", value: opts.value || "", placeholder: opts.placeholder || "", id: opts.id, onInput: opts.onInput, min: opts.min, max: opts.max });
   }
 
   function textArea(opts) {

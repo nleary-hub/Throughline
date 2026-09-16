@@ -3,14 +3,71 @@
 window.Views = window.Views || {};
 window.Views.settings = (() => {
 
+  const ROLE_OPTIONS = [
+    { value: "director", label: "Director" },
+    { value: "senior_director", label: "Senior director" },
+    { value: "peer_director", label: "Peer director" },
+    { value: "manager", label: "Manager" },
+    { value: "coordinator", label: "Coordinator" },
+    { value: "physician", label: "Physician" },
+    { value: "contributor", label: "Contributor" },
+  ];
+
+  function openAddPersonModal(S, actions) {
+    const nameInput = UI.textInput({ placeholder: "Full name" });
+    const titleInput = UI.textInput({ placeholder: "Title, e.g. Director, Medicine" });
+    const roleSel = UI.select(ROLE_OPTIONS, { value: "contributor" });
+    const areaSel = UI.select([{ value: "", label: "None" }, ...(S.config.areas || []).map(a => ({ value: a.id, label: a.name }))], {});
+    let depts = [];
+    const deptWrap = UI.el("div", { class: "check-row" });
+    function drawDepts() {
+      UI.clear(deptWrap);
+      for (const d of S.config.departments || []) {
+        deptWrap.appendChild(UI.pillOption(d.name, depts.includes(d.id), () => {
+          depts = depts.includes(d.id) ? depts.filter((x) => x !== d.id) : [...depts, d.id];
+          drawDepts();
+        }));
+      }
+    }
+    drawDepts();
+
+    const m = UI.modal({
+      title: "Add person",
+      body: UI.el("div", { class: "card-stack" }, [
+        UI.field("Name", nameInput),
+        UI.field("Title", titleInput),
+        UI.field("Role", roleSel),
+        UI.field("Departments", deptWrap),
+        UI.field("Area (for directors and peer directors)", areaSel),
+      ]),
+      footer: [
+        UI.button("Cancel", { variant: "ghost", onClick: () => m.close() }),
+        UI.button("Add", { variant: "primary", onClick: async () => {
+          if (!nameInput.value.trim()) { UI.toast("Name is required."); return; }
+          const id = Store.newId("ppl_");
+          const person = {
+            id, name: nameInput.value.trim(), title: titleInput.value.trim(),
+            role: roleSel.value, departments: depts, areaId: areaSel.value || null,
+          };
+          await Store.put("people", id, person);
+          m.close();
+          UI.toast(`${person.name} added.`);
+        }}),
+      ],
+    });
+  }
+
   function peopleSection(S, actions) {
     const rows = S.people.map(p => UI.el("div", { class: "card", style: { display: "flex", justifyContent: "space-between", alignItems: "center" } }, [
       UI.personRow(p),
       UI.chip(p.role.replace("_", " "), "neutral"),
     ]));
     return UI.card([
-      UI.el("div", { class: "text-section" }, "People and roles"),
-      UI.el("div", { class: "text-meta", style: { margin: "4px 0 10px" } }, "Adding or removing people isn't wired up yet in Phase 1 — this lists who's seeded."),
+      UI.el("div", { class: "card-header" }, [
+        UI.el("div", { class: "text-section" }, "People and roles"),
+        UI.button("Add person", { sm: true, variant: "ghost", onClick: () => openAddPersonModal(S, actions) }),
+      ]),
+      UI.el("div", { class: "text-meta", style: { margin: "4px 0 10px" } }, "Editing or removing an existing person isn't wired up yet — that would need to reassign or archive everything already attributed to them."),
       UI.el("div", { class: "card-stack" }, rows),
     ]);
   }

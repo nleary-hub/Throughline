@@ -60,15 +60,15 @@ window.Views.triage = (() => {
           drawDetail();
         }));
       }
-      const capitalInput = UI.textInput({ type: "number", value: String(ini.estimates.capital || 0) });
-      const fteInput = UI.textInput({ type: "number", value: String(ini.estimates.fte || 0) });
+      const capitalInput = UI.textInput({ type: "number", min: "0", value: String(ini.estimates.capital || 0) });
+      const fteInput = UI.textInput({ type: "number", min: "0", value: String(ini.estimates.fte || 0) });
       const crossesCheck = UI.pillOption("Crosses service lines", !!ini.estimates.crossesServiceLines, () => { ini.estimates.crossesServiceLines = !ini.estimates.crossesServiceLines; drawDetail(); });
 
       function currentDraft() {
         return {
           ...ini, type: typeSel.value, track: trackSel.value, size: sizeSel.value || null,
           ownerId: ownerSel.value || null, sponsorId: sponsorSel.value || null, departments: depts,
-          estimates: { capital: Number(capitalInput.value) || 0, fte: Number(fteInput.value) || 0, crossesServiceLines: ini.estimates.crossesServiceLines },
+          estimates: { capital: Math.max(0, Number(capitalInput.value) || 0), fte: Math.max(0, Number(fteInput.value) || 0), crossesServiceLines: ini.estimates.crossesServiceLines },
         };
       }
 
@@ -85,14 +85,14 @@ window.Views.triage = (() => {
           ]));
         }
       }
-      const waived = new Set();
+      const waived = new Map(); // key -> reason
       function openWaiveModal(a) {
         const reasonInput = UI.textArea({ placeholder: "Why doesn't this apply here?" });
         const m = UI.modal({
           title: `Waive ${Model.REQ_LABEL[a.key]}`, body: UI.field("Reason", reasonInput),
           footer: [UI.button("Cancel", { variant: "ghost", onClick: () => m.close() }), UI.button("Waive", { variant: "primary", onClick: () => {
             if (!reasonInput.value.trim()) { UI.toast("A reason is required."); return; }
-            waived.add(a.key + "::" + reasonInput.value.trim());
+            waived.set(a.key, reasonInput.value.trim());
             m.close();
             UI.toast(`${Model.REQ_LABEL[a.key]} will be marked exempt.`);
           }})],
@@ -120,13 +120,7 @@ window.Views.triage = (() => {
           UI.button("Accept", { variant: "primary", onClick: async () => {
             const draft = currentDraft();
             let applicable = Model.reconcileRequirements(draft, S.config);
-            applicable = applicable.map(r => {
-              for (const w of waived) {
-                const [key, reason] = w.split("::");
-                if (r.key === key) return { ...r, status: "exempt", rationale: reason };
-              }
-              return r;
-            });
+            applicable = applicable.map(r => waived.has(r.key) ? { ...r, status: "exempt", rationale: waived.get(r.key) } : r);
             draft.requirements = applicable;
             draft.stage = "evaluating"; draft.stageEnteredOn = UI.todayStr();
             draft.nextAction = { text: "Set size and complete evaluation", ownerId: draft.ownerId, dueOn: null, kind: "task" };
